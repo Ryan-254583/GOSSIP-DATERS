@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../firebase'; // Make sure firebase is initialized
+import { db } from '../lib/firebase'; // Make sure firebase is initialized
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
 export default function ChatBox({ currentUser, users }) {
