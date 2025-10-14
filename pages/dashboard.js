@@ -1,77 +1,29 @@
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/router';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import ProfileCard from '../components/ProfileCard';
 import ChatBox from '../components/ChatBox';
-import { auth, db } from '../lib/firebase';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
+import Image from 'next/image';
 
 export default function Dashboard() {
-  const router = useRouter();
-  const [currentUser, setCurrentUser] = useState(null);
-  const [users, setUsers] = useState([]);
-
-  useEffect(() => {
-    const unsubscribeAuth = auth.onAuthStateChanged((user) => {
-      if (!user) router.push('/signin');
-      else setCurrentUser(user);
-    });
-    return () => unsubscribeAuth();
-  }, [router]);
-
-  useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-      const fetchedUsers = snapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .filter((u) => u.id !== currentUser?.uid);
-      setUsers(fetchedUsers);
-    });
-    return () => unsubscribe();
-  }, [currentUser]);
-
-  const handleLogout = async () => {
-    await signOut(auth);
-    router.push('/signin');
-  };
-
   return (
-    <div className="relative min-h-screen flex flex-col">
-      {/* Background logo */}
-      <div className="absolute inset-0 z-0">
-        <img
-          src="/logo.png"
-          alt="CUK Gossip Logo"
-          className="w-full h-full object-cover opacity-40 filter brightness-50"
+    <div className="relative w-full h-screen">
+      <Header />
+      <div className="absolute inset-0">
+        <Image 
+          src="/logo.png" 
+          alt="Background Logo" 
+          layout="fill" 
+          objectFit="cover" 
+          style={{ filter: 'brightness(50%)', opacity: 0.4 }}
         />
       </div>
-
-      <div className="relative z-10 flex flex-col flex-1 p-6 max-w-6xl mx-auto w-full">
-        <Header />
-
-        <div className="flex justify-between w-full mb-6">
-          <h2 className="text-3xl font-bold text-red-800">Dashboard</h2>
-          <button
-            onClick={handleLogout}
-            className="bg-red-800 text-white px-4 py-2 rounded hover:bg-red-700 transition"
-          >
-            Logout
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 w-full">
-          {users.length > 0
-            ? users.map((user) => <ProfileCard key={user.id} user={user} />)
-            : <p className="text-gray-500">No users yet.</p>}
-        </div>
-
-        <div className="w-full mt-6">
-          {currentUser && <ChatBox currentUser={currentUser} users={users} />}
-        </div>
-
-        <Footer />
+      <div className="z-10 p-6 grid grid-cols-3 gap-4">
+        <ProfileCard />
+        <ProfileCard />
+        <ProfileCard />
       </div>
+      <ChatBox />
+      <Footer />
     </div>
   );
 }
