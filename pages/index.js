@@ -1,31 +1,45 @@
 import { useRouter } from 'next/router';
-import Image from 'next/image';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
+import { useState } from 'react';
 
 export default function Home() {
   const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleContinue = () => {
+    setIsLoading(true);
+    router.push('/signup');
+  };
 
   return (
-    <div className="relative w-full h-screen flex flex-col items-center justify-center">
+    <div
+      className="w-full h-screen flex flex-col items-center justify-center text-center"
+      style={{
+        backgroundImage: 'url("/logo.png")',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        filter: 'brightness(80%)',
+      }}
+    >
       <Header />
-      <div className="absolute inset-0">
-        <Image 
-          src="/logo.png" 
-          alt="Background Logo" 
-          layout="fill" 
-          objectFit="cover"
-          style={{ filter: 'brightness(50%)', opacity: 0.4 }}
-        />
-      </div>
-      <div className="z-10 flex flex-col items-center justify-center">
+
+      <div className="flex flex-col items-center justify-center space-y-6 z-10 relative">
+        <h1 className="text-white text-3xl font-bold">Welcome</h1>
         <button
-          onClick={() => router.push('/signup')}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+          onClick={handleContinue}
+          disabled={isLoading}
+          className={`px-6 py-3 text-white font-semibold rounded-lg transition ${
+            isLoading
+              ? 'bg-gray-500 cursor-not-allowed'
+              : 'bg-blue-600 hover:bg-blue-700'
+          }`}
         >
-          Accept & Continue
+          {isLoading ? 'Please wait...' : 'Accept & Continue'}
         </button>
       </div>
+
       <Footer />
     </div>
   );
