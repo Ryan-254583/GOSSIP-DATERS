@@ -1,23 +1,30 @@
-import React from 'react';
+"use client";
+import React from "react";
 
 export default function ProfileCard({ user }) {
-  return (
-    <div className="bg-red-800 bg-opacity-80 text-white rounded-lg shadow p-4 flex items-center space-x-4 w-full hover:scale-105 transition-transform">
-      <img
-        src={user.photoURL || '/logo.png'}
-        alt={user.name}
-        className="w-16 h-16 rounded-full object-cover border-2 border-white"
-      />
-      <div className="flex-1">
-        <h3 className="font-bold text-lg">{user.name}</h3>
-        <p className="text-sm">@{user.username}</p>
+  // Safety check if user is undefined
+  if (!user) {
+    return (
+      <div className="text-center p-6 bg-gray-100 rounded-xl shadow-md">
+        <p className="text-gray-500">Loading profile...</p>
       </div>
-      <div
-        className={`w-4 h-4 rounded-full ${
-          user.online ? 'bg-green-500' : 'bg-gray-400'
-        }`}
-        title={user.online ? 'Online' : 'Offline'}
-      ></div>
+    );
+  }
+
+  // Fallbacks for missing data
+  const photo = user.photoURL || "/default-avatar.png";
+  const name = user.displayName || "Anonymous User";
+  const email = user.email || "No email available";
+
+  return (
+    <div className="flex flex-col items-center bg-white p-6 rounded-xl shadow-lg">
+      <img
+        src={photo}
+        alt="User Avatar"
+        className="w-24 h-24 rounded-full object-cover border border-gray-300"
+      />
+      <h3 className="text-lg font-semibold mt-3">{name}</h3>
+      <p className="text-gray-600 text-sm">{email}</p>
     </div>
   );
 }

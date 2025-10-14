@@ -1,63 +1,87 @@
-import { useState } from 'react';
-import { useRouter } from 'next/router';
-import { auth } from '../lib/firebase';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import Header from '../components/Header';
-import Footer from '../components/Footer';
+"use client";
+import React, { useState } from "react";
+import Image from "next/image"; // ✅ FIXED IMPORT
+import { useRouter } from "next/navigation";
+import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { auth } from "../lib/firebase";
 
 export default function Signup() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleSignup = async () => {
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
-      router.push('/dashboard');
-    } catch (error) {
-      console.error(error);
-      alert(error.message);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(userCredential.user, { displayName: name });
+      router.push("/dashboard");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="relative w-full h-screen flex flex-col items-center justify-center">
-      <Header />
-      <div className="absolute inset-0">
-        <Image 
-          src="/logo.png" 
-          alt="Background Logo" 
-          layout="fill" 
-          objectFit="cover"
-          style={{ filter: 'brightness(50%)', opacity: 0.4 }}
-        />
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-100 to-purple-200 p-6">
+      <div className="bg-white p-8 rounded-2xl shadow-lg max-w-md w-full">
+        <div className="text-center mb-6">
+          <Image
+            src="/signup-illustration.png"
+            alt="Signup Illustration"
+            width={200}
+            height={150}
+            className="mx-auto"
+          />
+          <h2 className="text-2xl font-bold text-gray-800 mt-4">
+            Join Gossip Daters 💞
+          </h2>
+          <p className="text-gray-500">Create your account to get started</p>
+        </div>
+
+        <form onSubmit={handleSignup} className="space-y-4">
+          <input
+            type="text"
+            placeholder="Full Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            className="w-full border p-3 rounded-lg"
+          />
+          <input
+            type="email"
+            placeholder="Email Address"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="w-full border p-3 rounded-lg"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="w-full border p-3 rounded-lg"
+          />
+
+          {error && <p className="text-red-500 text-sm">{error}</p>}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-pink-500 text-white py-3 rounded-lg hover:bg-pink-600 transition disabled:opacity-60"
+          >
+            {loading ? "Creating account..." : "Sign Up"}
+          </button>
+        </form>
       </div>
-      <div className="z-10 flex flex-col space-y-4">
-        <input 
-          type="email" 
-          placeholder="Email" 
-          value={email} 
-          onChange={e => setEmail(e.target.value)} 
-          className="px-4 py-2 rounded-lg border"
-        />
-        <input 
-          type="password" 
-          placeholder="Password" 
-          value={password} 
-          onChange={e => setPassword(e.target.value)} 
-          className="px-4 py-2 rounded-lg border"
-        />
-        <button 
-          onClick={handleSignup} 
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-        >
-          Sign Up
-        </button>
-        <p className="text-sm">
-          Already have an account? <span className="text-blue-600 cursor-pointer" onClick={() => router.push('/signin')}>Login</span>
-        </p>
-      </div>
-      <Footer />
     </div>
   );
 }
