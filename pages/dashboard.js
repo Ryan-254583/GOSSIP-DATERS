@@ -1,6 +1,6 @@
 "use client";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
-import { useEffect, useState } from "react";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -11,10 +11,11 @@ export default function Dashboard() {
     { id: 3, user: "Becky", text: "Pretty good! Just checking this new app out 😄" },
   ]);
   const [newMessage, setNewMessage] = useState("");
+  const [dmUser, setDmUser] = useState(null); // For individual chat
 
-  // ✅ Check if user is logged in
+  // Check if user is logged in
   useEffect(() => {
-    const loggedInUser = JSON.parse(localStorage.getItem("user"));
+    const loggedInUser = JSON.parse(localStorage.getItem("loggedInUser"));
     if (!loggedInUser) {
       router.push("/signin");
     } else {
@@ -22,62 +23,53 @@ export default function Dashboard() {
     }
   }, [router]);
 
-  // ✅ Logout
   const handleLogout = () => {
-    localStorage.removeItem("user");
+    localStorage.removeItem("loggedInUser");
     router.push("/signin");
   };
 
-  // ✅ Delete Account
-  const handleDeleteAccount = () => {
-    const users = JSON.parse(localStorage.getItem("users")) || [];
-    const updatedUsers = users.filter((u) => u.email !== user?.email);
-    localStorage.setItem("users", JSON.stringify(updatedUsers));
-    localStorage.removeItem("user");
-    alert("Your account has been deleted.");
-    router.push("/signup");
-  };
-
-  // ✅ Send Message
   const handleSend = () => {
     if (newMessage.trim() === "") return;
     const newMsg = {
       id: Date.now(),
       user: user?.email?.split("@")[0] || "You",
       text: newMessage,
+      dm: dmUser || null,
     };
-    setMessages((prev) => [...prev, newMsg]);
+    setMessages([...messages, newMsg]);
     setNewMessage("");
   };
+
+  // Filter messages for community or individual DM
+  const visibleMessages = messages.filter(
+    (msg) => !dmUser || msg.user === dmUser || msg.user === (user?.email?.split("@")[0] || "You")
+  );
 
   return (
     <div style={styles.container}>
       <div style={styles.overlay}></div>
 
-      <div style={styles.content}>
-        {/* Header */}
-        <header style={styles.header}>
-          <h1 style={styles.title}>Gossip Daters 💌</h1>
-          {user && (
-            <p style={styles.welcome}>
-              Logged in as <b>{user.email}</b>
-            </p>
-          )}
-          <div style={styles.buttons}>
-            <button onClick={handleLogout} style={styles.logout}>
-              Logout
-            </button>
-            <button onClick={handleDeleteAccount} style={styles.delete}>
-              Delete Account
-            </button>
-          </div>
-        </header>
+      <nav style={styles.navbar}>
+        <h1 style={styles.title}>Gossip Daters 💌</h1>
+        {user && (
+          <p style={styles.welcome}>
+            Logged in as <b>{user.email}</b>
+          </p>
+        )}
+        <div>
+          <button onClick={handleLogout} style={styles.navButton}>Logout</button>
+          <button onClick={() => localStorage.removeItem("loggedInUser") || router.push("/signin")} style={styles.navButton}>Delete Account</button>
+        </div>
+      </nav>
 
+      <main style={styles.content}>
         {/* Chat Section */}
-        <main style={styles.chatSection}>
-          <h2 style={styles.chatTitle}>Community Feed</h2>
+        <section style={styles.chatSection}>
+          <h2 style={styles.chatTitle}>
+            {dmUser ? `Chatting with ${dmUser}` : "Community Feed"}
+          </h2>
           <div style={styles.chatBox}>
-            {messages.map((msg) => (
+            {visibleMessages.map((msg) => (
               <div
                 key={msg.id}
                 style={{
@@ -111,8 +103,22 @@ export default function Dashboard() {
               Send
             </button>
           </div>
-        </main>
-      </div>
+        </section>
+
+        {/* Users List */}
+        <aside style={styles.usersList}>
+          <h3 style={{ color: "#ff4d4d" }}>Users</h3>
+          {["Becky", "Emmanuel", "John Doe"].map((u) => (
+            <div key={u} style={styles.userCard}>
+              <div style={styles.profilePhoto}></div>
+              <span>{u}</span>
+              <button onClick={() => setDmUser(u)} style={styles.dmButton}>
+                DM
+              </button>
+            </div>
+          ))}
+        </aside>
+      </main>
     </div>
   );
 }
@@ -126,71 +132,62 @@ const styles = {
     color: "white",
     overflow: "hidden",
     display: "flex",
-    justifyContent: "center",
+    flexDirection: "column",
     alignItems: "center",
+    paddingBottom: "20px",
   },
   overlay: {
     position: "absolute",
     inset: 0,
     backgroundImage: `
-      linear-gradient(to bottom right, rgba(0,0,0,0.9), rgba(0,0,0,0.95)),
+      linear-gradient(to bottom right, rgba(0,0,0,0.85), rgba(0,0,0,0.95)),
       url('/logo.png')
     `,
     backgroundSize: "cover",
     backgroundPosition: "center",
-    filter: "brightness(30%) blur(2px)",
+    filter: "brightness(40%) blur(2px)",
     zIndex: 1,
+  },
+  navbar: {
+    position: "relative",
+    zIndex: 2,
+    width: "95%",
+    maxWidth: "900px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: "20px",
+  },
+  title: { fontSize: "2rem", color: "#ff3333" },
+  welcome: { color: "#ff9999" },
+  navButton: {
+    marginLeft: "10px",
+    backgroundColor: "#b30000",
+    color: "white",
+    padding: "6px 14px",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
   },
   content: {
     position: "relative",
     zIndex: 2,
     width: "95%",
     maxWidth: "900px",
-    padding: "20px",
-  },
-  header: {
-    textAlign: "center",
-    marginBottom: "20px",
-  },
-  title: { fontSize: "2rem", color: "#ff3333", marginBottom: "5px" },
-  welcome: { fontSize: "1rem", color: "#ff9999" },
-  buttons: {
-    marginTop: "10px",
     display: "flex",
-    justifyContent: "center",
-    gap: "10px",
-  },
-  logout: {
-    backgroundColor: "#b30000",
-    color: "white",
-    padding: "8px 20px",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    fontWeight: "bold",
-    transition: "0.3s",
-  },
-  delete: {
-    backgroundColor: "#660000",
-    color: "#ffcccc",
-    padding: "8px 20px",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    fontWeight: "bold",
-    transition: "0.3s",
+    gap: "20px",
+    marginTop: "20px",
   },
   chatSection: {
+    flex: 3,
     backgroundColor: "rgba(0,0,0,0.7)",
     padding: "20px",
     borderRadius: "15px",
     boxShadow: "0 0 25px rgba(255,0,0,0.3)",
+    display: "flex",
+    flexDirection: "column",
   },
-  chatTitle: {
-    textAlign: "center",
-    color: "#ff4d4d",
-    marginBottom: "10px",
-  },
+  chatTitle: { textAlign: "center", color: "#ff4d4d", marginBottom: "10px" },
   chatBox: {
     display: "flex",
     flexDirection: "column",
@@ -208,10 +205,7 @@ const styles = {
     maxWidth: "75%",
     wordWrap: "break-word",
   },
-  inputArea: {
-    display: "flex",
-    marginTop: "15px",
-  },
+  inputArea: { display: "flex", marginTop: "15px" },
   input: {
     flex: 1,
     padding: "10px",
@@ -229,6 +223,39 @@ const styles = {
     padding: "10px 20px",
     cursor: "pointer",
     fontWeight: "bold",
-    transition: "0.3s",
+  },
+  usersList: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    padding: "15px",
+    borderRadius: "15px",
+    maxHeight: "60vh",
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  },
+  userCard: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#262626",
+    padding: "8px",
+    borderRadius: "8px",
+  },
+  profilePhoto: {
+    width: "30px",
+    height: "30px",
+    borderRadius: "50%",
+    backgroundColor: "#ff3333",
+    marginRight: "10px",
+  },
+  dmButton: {
+    backgroundColor: "#b30000",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    padding: "4px 8px",
+    cursor: "pointer",
   },
 };

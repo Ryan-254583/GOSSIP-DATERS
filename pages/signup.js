@@ -6,20 +6,30 @@ export default function Signup() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [age, setAge] = useState("");
+  const [photo, setPhoto] = useState(null);
 
   const handleSignup = (e) => {
     e.preventDefault();
-    const existingUsers = JSON.parse(localStorage.getItem("users")) || [];
-    const userExists = existingUsers.find((u) => u.email === email);
+    const users = JSON.parse(localStorage.getItem("users")) || [];
+    if (users.some((u) => u.email === email)) {
+      alert("Email already exists. Please sign in.");
+      router.push("/signin");
+      return;
+    }
+    const newUser = { email, password, age, photo };
+    users.push(newUser);
+    localStorage.setItem("users", JSON.stringify(users));
+    localStorage.setItem("loggedInUser", JSON.stringify(newUser));
+    router.push("/dashboard");
+  };
 
-    if (userExists) {
-      alert("Account already exists! Please sign in.");
-      router.push("/signin");
-    } else {
-      existingUsers.push({ email, password });
-      localStorage.setItem("users", JSON.stringify(existingUsers));
-      alert("Account created successfully!");
-      router.push("/signin");
+  const handlePhoto = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => setPhoto(reader.result);
+      reader.readAsDataURL(file);
     }
   };
 
@@ -27,7 +37,7 @@ export default function Signup() {
     <div style={styles.container}>
       <div style={styles.overlay}></div>
       <div style={styles.formContainer}>
-        <h1 style={styles.title}>Create Account</h1>
+        <h1 style={styles.title}>Sign Up</h1>
         <form onSubmit={handleSignup} style={styles.form}>
           <input
             type="email"
@@ -43,6 +53,20 @@ export default function Signup() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            style={styles.input}
+          />
+          <input
+            type="number"
+            placeholder="Age"
+            required
+            value={age}
+            onChange={(e) => setAge(e.target.value)}
+            style={styles.input}
+          />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handlePhoto}
             style={styles.input}
           />
           <button type="submit" style={styles.button}>
@@ -102,6 +126,8 @@ const styles = {
     border: "none",
     outline: "none",
     fontSize: "1rem",
+    backgroundColor: "#2d2d2d",
+    color: "white",
   },
   button: {
     backgroundColor: "#b30000",
