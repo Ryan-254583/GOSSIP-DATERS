@@ -1,5 +1,5 @@
 // pages/_app.js
-import '../styles/globals.css';
+import '../styles/globals.css'; // keep your global styles
 import { Analytics } from '@vercel/analytics/react';
 
 function MyApp({ Component, pageProps }) {
