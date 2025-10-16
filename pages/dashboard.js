@@ -2,72 +2,70 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { auth, db } from "../lib/firebase";
+import { auth, db, storage } from "../lib/firebase";
 import {
   onAuthStateChanged,
-  signOut
+  signOut,
+  updateProfile as fbUpdateProfile,
+  deleteUser as fbDeleteUser
 } from "firebase/auth";
 import {
   collection,
-  query,
-  orderBy,
-  addDoc,
-  onSnapshot,
-  serverTimestamp,
   doc,
   getDoc,
   setDoc,
-  where,
-  getDocs
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  addDoc,
+  serverTimestamp,
+  query,
+  orderBy,
+  where
 } from "firebase/firestore";
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import Image from "next/image";
 import { useRouter } from "next/router";
 
-/*
-  Dashboard with:
-   - Community Feed (global)
-   - Messages (private 1:1 chats list)
-   - Profile
-   - Discover (opposite gender matches) with Connect -> opens chat modal
-*/
-
+/* Dashboard with Edit Profile modal + Delete account + Forgot password handled on signin */
 export default function Dashboard() {
   const router = useRouter();
+  const [authUser, setAuthUser] = useState(null);
+  const [profile, setProfile] = useState(null);
 
-  // auth / profile
-  const [authUser, setAuthUser] = useState(null); // firebase auth user
-  const [profile, setProfile] = useState(null);   // firestore profile (username, gender, photoURL, uid)
-
-  // tabs: 'discover' | 'messages' | 'community' | 'profile'
   const [tab, setTab] = useState("discover");
 
-  // discover (matches)
+  // Discover (matches)
   const [matches, setMatches] = useState([]);
   const [loadingMatches, setLoadingMatches] = useState(true);
 
-  // community feed
+  // Community
   const [community, setCommunity] = useState([]);
   const [communityText, setCommunityText] = useState("");
   const [posting, setPosting] = useState(false);
 
-  // private chat modal
-  const [openChatWith, setOpenChatWith] = useState(null); // user object of the other person
+  // Chats
+  const [openChatWith, setOpenChatWith] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatText, setChatText] = useState("");
   const chatListRef = useRef(null);
   const currentChatUnsubRef = useRef(null);
 
-  // Messages list (existing chats)
-  const [myChats, setMyChats] = useState([]);
-  const [loadingChats, setLoadingChats] = useState(true);
+  // Edit profile modal
+  const [editing, setEditing] = useState(false);
+  const [newUsername, setNewUsername] = useState("");
+  const [newGender, setNewGender] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
 
-  // small helper: default avatar based on gender (public/avatars/male.png / female.png)
+  // helper for avatar fallback
   const avatarFor = (u) => {
     if (!u) return "/avatars/male.png";
-    return (u.gender === "female") ? "/avatars/female.png" : (u.photoURL || "/avatars/male.png");
+    if (u.photoURL) return u.photoURL;
+    return u.gender === "female" ? "/avatars/female.png" : "/avatars/male.png";
   };
 
-  // --- AUTH + load profile ---
+  // auth state & load profile
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
@@ -75,22 +73,12 @@ export default function Dashboard() {
         return;
       }
       setAuthUser(u);
-
-      // load user profile from Firestore users/{uid}
       try {
-        const docRef = doc(db, "users", u.uid);
-        const snap = await getDoc(docRef);
+        const snap = await getDoc(doc(db, "users", u.uid));
         if (snap.exists()) {
           setProfile(snap.data());
         } else {
-          // fallback: build profile from auth
-          const fallback = {
-            uid: u.uid,
-            username: u.displayName || (u.email ? u.email.split("@")[0] : "User"),
-            gender: null,
-            photoURL: u.photoURL || null,
-            email: u.email
-          };
+          const fallback = { uid: u.uid, username: u.displayName || (u.email ? u.email.split("@")[0] : "User"), gender: null, photoURL: u.photoURL || null, email: u.email };
           setProfile(fallback);
         }
       } catch (err) {
@@ -102,14 +90,13 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- load matches (opposite gender) in realtime ---
+  // load matches (opp gender)
   useEffect(() => {
     if (!profile) return;
     setLoadingMatches(true);
     const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
       const all = snap.docs.map(d => d.data()).filter(u => u.uid !== profile.uid);
-      // filter opposite gender if both have gender
       const filtered = all.filter(u => {
         if (!profile.gender || !u.gender) return true;
         return u.gender !== profile.gender;
@@ -120,11 +107,10 @@ export default function Dashboard() {
       console.error("matches snapshot:", err);
       setLoadingMatches(false);
     });
-
     return () => unsub();
   }, [profile]);
 
-  // --- community feed realtime ---
+  // community realtime
   useEffect(() => {
     const q = query(collection(db, "communityFeed"), orderBy("timestamp", "desc"));
     const unsub = onSnapshot(q, (snap) => {
@@ -133,35 +119,12 @@ export default function Dashboard() {
     return () => unsub();
   }, []);
 
-  // --- load my chats list (where I'm a participant) ---
-  useEffect(() => {
-    if (!profile) return;
-    setLoadingChats(true);
-    // chats where users array contains my uid
-    const q = query(collection(db, "chats"), where("users", "array-contains", profile.uid), orderBy("lastUpdated", "desc"));
-    const unsub = onSnapshot(q, (snap) => {
-      const chats = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // For display, we want the other user's username/photo; chats store `users` and optionally `meta` map to speed this
-      // We'll keep chats array as-is and look up user data when opening chat.
-      setMyChats(chats);
-      setLoadingChats(false);
-    }, err => {
-      console.error("my chats snapshot", err);
-      setLoadingChats(false);
-    });
-
-    return () => unsub();
-  }, [profile]);
-
-  // --- helpers: deterministic chatId ---
+  // --- chat helpers ---
   const chatIdFor = (a, b) => [a, b].sort().join("_");
 
-  // --- open private chat with user object (other) ---
-  const openPrivateChat = async (other) => {
+  const ensureChatAndOpen = async (other) => {
     if (!profile) return;
     const chatId = chatIdFor(profile.uid, other.uid);
-
-    // ensure chat doc exists
     try {
       const chatRef = doc(db, "chats", chatId);
       const chatSnap = await getDoc(chatRef);
@@ -180,33 +143,26 @@ export default function Dashboard() {
       console.error("ensure chat error", err);
     }
 
-    // subscribe to messages for this chat
+    // subscribe to messages
     subscribeToChatMessages(chatId);
-
     setOpenChatWith(other);
     setTab("messages");
   };
 
-  // subscribe to messages for chatId (stores unsubscribe in ref)
   const subscribeToChatMessages = (chatId) => {
-    // cleanup previous
     if (currentChatUnsubRef.current) {
       currentChatUnsubRef.current();
       currentChatUnsubRef.current = null;
     }
     if (!chatId) return;
-
     const msgsRef = collection(db, "chats", chatId, "messages");
     const q = query(msgsRef, orderBy("timestamp", "asc"));
     const unsub = onSnapshot(q, (snap) => {
-      const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setChatMessages(msgs);
-      // scroll
+      setChatMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setTimeout(() => {
         if (chatListRef.current) chatListRef.current.scrollTop = chatListRef.current.scrollHeight;
       }, 80);
-    }, err => console.error("chat messages snapshot", err));
-
+    }, err => console.error("chat msg snap", err));
     currentChatUnsubRef.current = unsub;
   };
 
@@ -220,7 +176,6 @@ export default function Dashboard() {
     setChatText("");
   };
 
-  // --- send private message ---
   const sendPrivateMessage = async (e) => {
     e?.preventDefault();
     if (!chatText.trim() || !profile || !openChatWith) return;
@@ -232,17 +187,14 @@ export default function Dashboard() {
         text: chatText.trim(),
         timestamp: serverTimestamp(),
       });
-
-      // update chat lastUpdated
-      await setDoc(doc(db, "chats", chatId), { lastUpdated: serverTimestamp() }, { merge: true });
-
+      await updateDoc(doc(db, "chats", chatId), { lastUpdated: serverTimestamp() }, { merge: true });
       setChatText("");
     } catch (err) {
-      console.error("sendPrivateMessage:", err);
+      console.error("send msg", err);
     }
   };
 
-  // --- post to community feed ---
+  // community post
   const postToCommunity = async (e) => {
     e?.preventDefault();
     if (!communityText.trim() || !profile) return;
@@ -251,55 +203,131 @@ export default function Dashboard() {
       await addDoc(collection(db, "communityFeed"), {
         uid: profile.uid,
         username: profile.username,
+        photoURL: profile.photoURL || null,
         text: communityText.trim(),
         timestamp: serverTimestamp()
       });
       setCommunityText("");
     } catch (err) {
-      console.error("postToCommunity:", err);
+      console.error("post community", err);
     } finally {
       setPosting(false);
     }
   };
 
-  // --- start chat from messages list (click chat tile) ---
-  const openChatFromList = async (chat) => {
-    if (!profile) return;
-    // find the other uid in chat.users
-    const otherUid = (chat.users || []).find(u => u !== profile.uid);
-    if (!otherUid) return;
-
-    // load other user profile
-    try {
-      const otherSnap = await getDoc(doc(db, "users", otherUid));
-      const other = otherSnap.exists() ? otherSnap.data() : { uid: otherUid, username: otherUid, photoURL: null };
-      openPrivateChat(other);
-    } catch (err) {
-      console.error("openChatFromList error", err);
-    }
-  };
-
-  // --- logout ---
+  // LOGOUT
   const doLogout = async () => {
     await signOut(auth);
     localStorage.removeItem("user");
     router.push("/signin");
   };
 
+  // -------------- EDIT PROFILE FLOW --------------
+  const openEdit = () => {
+    setNewUsername(profile.username || "");
+    setNewGender(profile.gender || "");
+    setSelectedFile(null);
+    setEditing(true);
+  };
 
-  // --- UI rendering ---
+  const handleFileChange = (e) => {
+    setSelectedFile(e.target.files?.[0] || null);
+  };
+
+  const handleSaveProfile = async (e) => {
+    e?.preventDefault();
+    if (!profile) return;
+    setUploading(true);
+
+    let photoURL = profile.photoURL || null;
+
+    // If user selected a file and storage configured, try upload
+    if (selectedFile) {
+      try {
+        const path = `profiles/${profile.uid}/${Date.now()}_${selectedFile.name}`;
+        const sRef = storageRef(storage, path);
+        const uploadTask = uploadBytesResumable(sRef, selectedFile);
+        // wait for upload completion (promise wrapper)
+        await new Promise((resolve, reject) => {
+          uploadTask.on("state_changed", null, (err) => reject(err), async () => {
+            try {
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              photoURL = url;
+              resolve();
+            } catch (err) {
+              reject(err);
+            }
+          });
+        });
+      } catch (err) {
+        console.warn("image upload failed, will keep previous avatar or default:", err);
+        // continue and save other fields
+      }
+    }
+
+    try {
+      // update Firestore user doc
+      await updateDoc(doc(db, "users", profile.uid), {
+        username: newUsername,
+        gender: newGender,
+        photoURL: photoURL || null,
+        updatedAt: serverTimestamp()
+      });
+
+      // update Firebase Auth profile (optional)
+      try {
+        if (auth.currentUser) {
+          await fbUpdateProfile(auth.currentUser, { displayName: newUsername, photoURL: photoURL || null });
+        }
+      } catch (err) {
+        console.warn("Could not update auth profile:", err);
+      }
+
+      // refresh local profile state
+      setProfile(prev => ({ ...prev, username: newUsername, gender: newGender, photoURL: photoURL || prev.photoURL }));
+      setEditing(false);
+    } catch (err) {
+      console.error("save profile error", err);
+      alert("Could not save profile.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Delete account (delete Firestore doc and Firebase Auth user)
+  const handleDeleteAccount = async () => {
+    if (!confirm("Delete your account permanently? This cannot be undone.")) return;
+    if (!profile) return;
+    try {
+      // remove user doc
+      await deleteDoc(doc(db, "users", profile.uid));
+      // attempt to delete auth user
+      if (auth.currentUser) {
+        try {
+          await fbDeleteUser(auth.currentUser);
+        } catch (err) {
+          console.error("delete auth user error", err);
+          alert("Could not delete auth user automatically. Please sign in again in console and delete account manually if necessary.");
+          return;
+        }
+      }
+      localStorage.removeItem("user");
+      router.push("/signin");
+    } catch (err) {
+      console.error("delete account error", err);
+      alert("Could not delete account: " + (err.message || err));
+    }
+  };
+
+  // UI: loading profile
   if (!profile) {
-    return (
-      <div style={center}>
-        <div style={{ color: "#ccc" }}>Loading profile…</div>
-      </div>
-    );
+    return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>Loading profile…</div>;
   }
 
   return (
     <div style={{ minHeight: "100vh", background: "#070708", color: "#fff", fontFamily: "Inter, sans-serif" }}>
       {/* NAV */}
-      <header style={nav}>
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
         <div>
           <strong style={{ color: "#ff5252", fontSize: 20 }}>CUK Gossip</strong>
           <div style={{ fontSize: 12, color: "#aaa" }}>Meet • Chat • Connect</div>
@@ -310,38 +338,36 @@ export default function Dashboard() {
             <div style={{ fontWeight: 700 }}>{profile.username}</div>
             <div style={{ fontSize: 12, color: "#bbb" }}>{profile.gender || "Not specified"}</div>
           </div>
-          <img src={profile.photoURL || avatarFor(profile)} alt="me" style={{ width: 44, height: 44, borderRadius: 999 }} />
-          <button onClick={doLogout} style={logoutBtn}>Logout</button>
+          <img src={avatarFor(profile)} alt="me" style={{ width: 44, height: 44, borderRadius: 999 }} />
+          <button onClick={doLogout} style={{ background: "#b30000", border: "none", padding: "8px 12px", borderRadius: 8, color: "#fff" }}>Logout</button>
         </div>
       </header>
 
       {/* TAB BAR */}
-      <nav style={tabbar}>
-        <button onClick={() => setTab("discover")} style={tabButton(tab === "discover")}>Discover</button>
-        <button onClick={() => setTab("messages")} style={tabButton(tab === "messages")}>Messages</button>
-        <button onClick={() => setTab("community")} style={tabButton(tab === "community")}>Community</button>
-        <button onClick={() => setTab("profile")} style={tabButton(tab === "profile")}>Profile</button>
+      <nav style={{ display: "flex", gap: 12, justifyContent: "center", padding: 10, background: "#0b0b0b", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
+        <button onClick={() => setTab("discover")} style={{ padding: "8px 14px", borderRadius: 8, border: "none", cursor: "pointer", color: tab === "discover" ? "#ff6b6b" : "#bbb" }}>Discover</button>
+        <button onClick={() => setTab("messages")} style={{ padding: "8px 14px", borderRadius: 8, border: "none", cursor: "pointer", color: tab === "messages" ? "#ff6b6b" : "#bbb" }}>Messages</button>
+        <button onClick={() => setTab("community")} style={{ padding: "8px 14px", borderRadius: 8, border: "none", cursor: "pointer", color: tab === "community" ? "#ff6b6b" : "#bbb" }}>Community</button>
+        <button onClick={() => setTab("profile")} style={{ padding: "8px 14px", borderRadius: 8, border: "none", cursor: "pointer", color: tab === "profile" ? "#ff6b6b" : "#bbb" }}>Profile</button>
       </nav>
 
-      {/* PAGE CONTENT */}
       <main style={{ maxWidth: 1000, margin: "20px auto", padding: "0 14px" }}>
-        {/* DISCOVER: grid of opposite gender matches */}
+        {/* Discover */}
         {tab === "discover" && (
           <section>
-            <h2 style={sectionTitle}>Discover</h2>
-            <p style={muted}>Profiles suggested for you — tap Connect to start a private chat.</p>
-
-            {loadingMatches ? <div style={muted}>Loading matches…</div> : (
-              <div style={grid}>
-                {matches.length === 0 && <div style={empty}>No matches found yet.</div>}
+            <h2 style={{ fontSize: 20, marginBottom: 6 }}>Discover</h2>
+            <p style={{ color: "#9a9a9a", marginBottom: 12 }}>Profiles suggested for you — tap Message to start a private chat.</p>
+            {loadingMatches ? <div style={{ color: "#aaa" }}>Loading matches…</div> : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
+                {matches.length === 0 && <div style={{ color: "#8a8a8a", textAlign: "center", padding: 18 }}>No matches found yet.</div>}
                 {matches.map(u => (
-                  <div key={u.uid} style={card}>
-                    <img src={u.photoURL || avatarFor(u)} alt={u.username} style={avatarSmall} />
-                    <div style={{ marginTop: 6, fontWeight: 700 }}>{u.username}</div>
+                  <div key={u.uid} style={{ background: "#0f0f10", padding: 12, borderRadius: 12, textAlign: "center", boxShadow: "0 8px 20px rgba(0,0,0,0.6)" }}>
+                    <img src={u.photoURL || (u.gender === "female" ? "/avatars/female.png" : "/avatars/male.png")} alt={u.username} style={{ width: 68, height: 68, borderRadius: 999, objectFit: "cover", marginBottom: 8 }} />
+                    <div style={{ fontWeight: 700 }}>{u.username}</div>
                     <div style={{ color: "#bbb", fontSize: 13, marginBottom: 8 }}>{u.gender || "-"}</div>
                     <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-                      <button onClick={() => openPrivateChat(u)} style={primaryBtn}>Message</button>
-                      <button onClick={() => {}} style={ghostBtn}>View</button>
+                      <button onClick={() => ensureChatAndOpen(u)} style={{ background: "#b30000", color: "#fff", padding: "8px 10px", borderRadius: 8, border: "none", fontWeight: 700 }}>Message</button>
+                      <button onClick={() => alert("Profile view not implemented yet")} style={{ background: "transparent", color: "#ccc", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.04)" }}>View</button>
                     </div>
                   </div>
                 ))}
@@ -350,53 +376,32 @@ export default function Dashboard() {
           </section>
         )}
 
-        {/* MESSAGES: list of chats and optionally open chat modal */}
+        {/* Messages */}
         {tab === "messages" && (
           <section>
-            <h2 style={sectionTitle}>Messages</h2>
-            <p style={muted}>Your private chats</p>
+            <h2 style={{ fontSize: 20, marginBottom: 6 }}>Messages</h2>
+            <p style={{ color: "#9a9a9a", marginBottom: 12 }}>Your private chats</p>
 
-            {loadingChats ? <div style={muted}>Loading chats…</div> : (
-              <div style={{ display: "grid", gap: 10 }}>
-                {myChats.length === 0 && <div style={empty}>No conversations yet — tap Message on someone's profile to start one.</div>}
-                {myChats.map(c => {
-                  const otherUid = (c.users || []).find(x => x !== profile.uid);
-                  const meta = c.userMeta && c.userMeta[otherUid] ? c.userMeta[otherUid] : null;
-                  return (
-                    <div key={c.id} style={chatTile} onClick={() => openChatFromList(c)}>
-                      <img src={(meta && meta.photoURL) || "/avatars/male.png"} alt="u" style={{ width: 48, height: 48, borderRadius: 999 }} />
-                      <div style={{ flex: 1, marginLeft: 10 }}>
-                        <div style={{ fontWeight: 700 }}>{(meta && meta.username) || otherUid}</div>
-                        <div style={{ color: "#aaa", fontSize: 13 }}>{c.lastMessagePreview || ""}</div>
-                      </div>
-                      <div style={{ color: "#999", fontSize: 12 }}>{c.lastUpdated ? new Date(c.lastUpdated.seconds * 1000).toLocaleTimeString() : ""}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {/* my chats list (we query chats where user is a participant) */}
+            <MyChatsList profile={profile} onOpenChat={async (other) => ensureChatAndOpen(other)} />
           </section>
         )}
 
-        {/* COMMUNITY: global feed with posting */}
+        {/* Community */}
         {tab === "community" && (
           <section>
-            <h2 style={sectionTitle}>Community Feed</h2>
-            <p style={muted}>Public posts from everyone — keep it friendly.</p>
+            <h2 style={{ fontSize: 20, marginBottom: 6 }}>Community Feed</h2>
+            <p style={{ color: "#9a9a9a", marginBottom: 12 }}>Public posts from everyone — keep it friendly.</p>
 
             <form onSubmit={postToCommunity} style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <input
-                value={communityText}
-                onChange={(e) => setCommunityText(e.target.value)}
-                placeholder="Share something with the community..."
-                style={communityInput}
-              />
-              <button disabled={posting} style={primaryBtn}>{posting ? "Posting…" : "Post"}</button>
+              <input value={communityText} onChange={(e) => setCommunityText(e.target.value)} placeholder="Share something with the community..." style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid #222", background: "#0b0b0b", color: "#fff" }} />
+              <button disabled={posting} style={{ background: "#b30000", color: "#fff", padding: "8px 12px", borderRadius: 8 }}>{posting ? "Posting…" : "Post"}</button>
             </form>
 
             <div style={{ display: "grid", gap: 10 }}>
+              {community.length === 0 && <div style={{ color: "#8a8a8a", textAlign: "center", padding: 18 }}>No posts yet — be the first to say hi!</div>}
               {community.map(p => (
-                <div key={p.id} style={cardLight}>
+                <div key={p.id} style={{ background: "#0f0f10", padding: 12, borderRadius: 10 }}>
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                     <img src={p.photoURL || "/avatars/male.png"} alt={p.username} style={{ width: 40, height: 40, borderRadius: 999 }} />
                     <div>
@@ -407,15 +412,14 @@ export default function Dashboard() {
                   <div style={{ marginTop: 8, color: "#ddd" }}>{p.text}</div>
                 </div>
               ))}
-              {community.length === 0 && <div style={empty}>No posts yet — be the first to say hi!</div>}
             </div>
           </section>
         )}
 
-        {/* PROFILE */}
+        {/* Profile */}
         {tab === "profile" && (
           <section>
-            <h2 style={sectionTitle}>Profile</h2>
+            <h2 style={{ fontSize: 20, marginBottom: 6 }}>Profile</h2>
             <div style={{ maxWidth: 420, margin: "10px auto", background: "#0f0f10", padding: 16, borderRadius: 12 }}>
               <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                 <img src={profile.photoURL || avatarFor(profile)} alt="me" style={{ width: 78, height: 78, borderRadius: 999 }} />
@@ -425,28 +429,25 @@ export default function Dashboard() {
                   <div style={{ color: "#bbb", marginTop: 6 }}>{profile.gender ? `Gender: ${profile.gender}` : "Set your gender in profile"}</div>
                 </div>
               </div>
-              <div style={{ marginTop: 12 }}>
-                <button style={primaryBtn} onClick={() => alert("Edit profile later (not implemented)")} >Edit Profile</button>
+              <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+                <button onClick={openEdit} style={{ background: "#b30000", color: "#fff", padding: "8px 12px", borderRadius: 8, border: "none", fontWeight: 700 }}>Edit Profile</button>
+                <button onClick={handleDeleteAccount} style={{ background: "#222", color: "#fff", padding: "8px 12px", borderRadius: 8 }}>Delete Account</button>
               </div>
             </div>
           </section>
         )}
       </main>
 
-      {/* CHAT MODAL (if open) */}
+      {/* Chat modal */}
       {openChatWith && (
-        <div style={modalOverlay}>
-          <div style={modalBox}>
+        <div style={{ position: "fixed", left: 0, right: 0, top: 0, bottom: 0, display: "flex", justifyContent: "center", alignItems: "center", background: "rgba(0,0,0,0.6)", zIndex: 9999 }}>
+          <div style={{ width: 640, maxWidth: "95%", background: "#0b0b0b", padding: 16, borderRadius: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                 <img src={openChatWith.photoURL || "/avatars/male.png"} alt={openChatWith.username} style={{ width: 44, height: 44, borderRadius: 999 }} />
-                <div>
-                  <div style={{ fontWeight: 800 }}>{openChatWith.username}</div>
-                </div>
+                <div style={{ fontWeight: 800 }}>{openChatWith.username}</div>
               </div>
-              <div>
-                <button onClick={closeChat} style={{ background: "transparent", border: "none", color: "#bbb", fontSize: 18 }}>✕</button>
-              </div>
+              <button onClick={closeChat} style={{ background: "transparent", border: "none", color: "#bbb", fontSize: 18 }}>✕</button>
             </div>
 
             <div ref={chatListRef} style={{ height: 320, overflowY: "auto", marginTop: 12, padding: 8, background: "#070707", borderRadius: 10 }}>
@@ -475,27 +476,91 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* EDIT PROFILE MODAL */}
+      {editing && (
+        <div style={{ position: "fixed", left: 0, right: 0, top: 0, bottom: 0, display: "flex", justifyContent: "center", alignItems: "center", background: "rgba(0,0,0,0.6)", zIndex: 9999 }}>
+          <form onSubmit={handleSaveProfile} style={{ width: 520, maxWidth: "95%", background: "#0b0b0b", padding: 16, borderRadius: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <h3 style={{ margin: 0 }}>Edit Profile</h3>
+              <button type="button" onClick={() => setEditing(false)} style={{ background: "transparent", border: "none", color: "#bbb", fontSize: 18 }}>✕</button>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+              <img src={profile.photoURL || avatarFor(profile)} alt="me" style={{ width: 72, height: 72, borderRadius: 999 }} />
+              <div style={{ flex: 1 }}>
+                <input placeholder="Username" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #222", background: "#0b0b0b", color: "#fff", marginBottom: 8 }} />
+                <select value={newGender} onChange={(e) => setNewGender(e.target.value)} style={{ width: "100%", padding: 10, borderRadius: 8, border: "1px solid #222", background: "#0b0b0b", color: "#fff" }}>
+                  <option value="">Select gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 6, color: "#ccc" }}>Upload new profile picture (optional)</label>
+              <input type="file" accept="image/*" onChange={handleFileChange} />
+              {uploading && <div style={{ color: "#aaa", marginTop: 8 }}>Uploading image…</div>}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setEditing(false)} style={{ background: "#222", color: "#fff", padding: "8px 12px", borderRadius: 8 }}>Cancel</button>
+              <button type="submit" disabled={uploading} style={{ background: "#b30000", color: "#fff", padding: "8px 12px", borderRadius: 8 }}>{uploading ? "Saving…" : "Save changes"}</button>
+              <button type="button" onClick={handleDeleteAccount} style={{ background: "#441111", color: "#fff", padding: "8px 12px", borderRadius: 8 }}>Delete Account</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
 
-/* ----------------- Styles ------------------ */
-const center = { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" };
-const nav = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", borderBottom: "1px solid rgba(255,255,255,0.03)" };
-const logoutBtn = { background: "#b30000", border: "none", padding: "8px 12px", borderRadius: 8, color: "#fff" };
-const tabbar = { display: "flex", gap: 12, justifyContent: "center", padding: 10, background: "#0b0b0b", borderBottom: "1px solid rgba(255,255,255,0.02)" };
-const tabButton = (active) => ({ background: active ? "#1a0b0b" : "transparent", color: active ? "#ff6b6b" : "#bbb", padding: "8px 14px", borderRadius: 8, border: "none", cursor: "pointer" });
-const sectionTitle = { fontSize: 20, marginBottom: 6, color: "#fff" };
-const muted = { color: "#9a9a9a", marginBottom: 12 };
-const grid = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 };
-const card = { background: "#0f0f10", padding: 12, borderRadius: 12, textAlign: "center", boxShadow: "0 8px 20px rgba(0,0,0,0.6)" };
-const avatarSmall = { width: 68, height: 68, borderRadius: 999, objectFit: "cover", margin: "0 auto", display: "block" };
-const primaryBtn = { background: "#b30000", color: "#fff", padding: "8px 10px", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 };
-const ghostBtn = { background: "transparent", color: "#ccc", padding: "8px 10px", border: "1px solid rgba(255,255,255,0.04)", borderRadius: 8 };
-const empty = { color: "#8a8a8a", textAlign: "center", padding: 18, background: "#0f0f10", borderRadius: 10 };
-const cardLight = { background: "#0f0f10", padding: 12, borderRadius: 10 };
-const communityInput = { flex: 1, padding: 10, borderRadius: 8, border: "1px solid #222", background: "#0b0b0b", color: "#fff" };
-const chatTile = { display: "flex", gap: 12, alignItems: "center", padding: 12, borderRadius: 10, background: "#0f0f10", cursor: "pointer", boxShadow: "0 6px 18px rgba(0,0,0,0.6)" };
+/* ---------- small helper component to list chats (fetch other user info) ---------- */
+function MyChatsList({ profile, onOpenChat }) {
+  const [myChats, setMyChats] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-const modalOverlay = { position: "fixed", left: 0, right: 0, top: 0, bottom: 0, display: "flex", justifyContent: "center", alignItems: "center", background: "rgba(0,0,0,0.6)", zIndex: 9999 };
-const modalBox = { width: 620, maxWidth: "95%", background: "#0b0b0b", padding: 16, borderRadius: 12, color: "#fff", boxShadow: "0 10px 40px rgba(0,0,0,0.7)" };
+  useEffect(() => {
+    if (!profile) return;
+    const q = query(collection(db, "chats"), where("users", "array-contains", profile.uid), orderBy("lastUpdated", "desc"));
+    const unsub = onSnapshot(q, async (snap) => {
+      const chats = await Promise.all(snap.docs.map(async d => {
+        const data = d.data();
+        const otherUid = (data.users || []).find(u => u !== profile.uid);
+        let other = { uid: otherUid, username: otherUid, photoURL: null };
+        try {
+          const snapU = await getDoc(doc(db, "users", otherUid));
+          if (snapU.exists()) other = snapU.data();
+        } catch (err) {
+          console.warn("couldn't fetch other user", err);
+        }
+        return { id: d.id, ...data, other };
+      }));
+      setMyChats(chats);
+      setLoading(false);
+    }, err => {
+      console.error("my chats list snap", err);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [profile]);
+
+  if (loading) return <div style={{ color: "#aaa" }}>Loading chats…</div>;
+  if (!myChats.length) return <div style={{ color: "#8a8a8a", textAlign: "center", padding: 18 }}>No conversations yet — message someone to start.</div>;
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {myChats.map(c => (
+        <div key={c.id} onClick={() => onOpenChat(c.other)} style={{ display: "flex", gap: 12, alignItems: "center", padding: 12, borderRadius: 10, background: "#0f0f10", cursor: "pointer", boxShadow: "0 6px 18px rgba(0,0,0,0.6)" }}>
+          <img src={c.other.photoURL || "/avatars/male.png"} alt={c.other.username} style={{ width: 48, height: 48, borderRadius: 999 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700 }}>{c.other.username}</div>
+            <div style={{ color: "#aaa", fontSize: 13 }}>{c.lastMessagePreview || ""}</div>
+          </div>
+          <div style={{ color: "#999", fontSize: 12 }}>{c.lastUpdated ? new Date(c.lastUpdated.seconds * 1000).toLocaleTimeString() : ""}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
