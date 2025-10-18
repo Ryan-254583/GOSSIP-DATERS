@@ -1,9 +1,14 @@
 {
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
-  "/_document": "pages/_document.js",
+  "/community": "pages/community.js",
+  "/document": "pages/document.js",
+  "/chat/[chatId]": "pages/chat/[chatId].js",
+  "/signin": "pages/signin.js",
+  "/message": "pages/message.js",
+  "/dashboard": "pages/dashboard.js",
   "/": "pages/index.js",
   "/signup": "pages/signup.js",
-  "/signin": "pages/signin.js",
-  "/dashboard": "pages/dashboard.js"
+  "/terms": "pages/terms.js",
+  "/_document": "pages/_document.js"
 }
