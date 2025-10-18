@@ -4,11 +4,17 @@ export default function Document() {
   return (
     <Html lang="en">
       <Head>
-        <link rel="manifest" href="/manifest.json" />
-        <link rel="icon" href="/logo.png" />
+        <meta charSet="UTF-8" />
         <meta name="theme-color" content="#b30000" />
+        <meta
+          name="description"
+          content="CUK Gossip Club - your campus social space for stories, updates, and connections."
+        />
+        <link rel="icon" href="/logo.png" type="image/png" />
+        <link rel="apple-touch-icon" href="/logo.png" />
+        <link rel="manifest" href="/manifest.json" />
       </Head>
-      <body>
+      <body className="bg-black text-white">
         <Main />
         <NextScript />
       </body>
