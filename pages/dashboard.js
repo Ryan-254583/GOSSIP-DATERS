@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { auth, db } from "../lib/firebase";
+import { auth, db, requestPermission, listenForMessages } from "../lib/firebase";
 import {
   onAuthStateChanged,
   signOut
@@ -44,6 +44,7 @@ export default function Dashboard() {
     return (u.gender === "female") ? "/avatars/female.png" : (u.photoURL || "/avatars/male.png");
   };
 
+  // Auth watcher
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
@@ -61,11 +62,40 @@ export default function Dashboard() {
           username: u.displayName || (u.email ? u.email.split("@")[0] : "User"),
           gender: null,
           photoURL: u.photoURL || null,
-          email: u.email
+          email: u.email,
+          createdAt: serverTimestamp()
         };
+        await setDoc(docRef, fallback);
         setProfile(fallback);
       }
     });
+    return () => unsub();
+  }, []);
+
+  // Request notification permission and listen for new users
+  useEffect(() => {
+    requestPermission();
+    listenForMessages();
+
+    const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
+    let firstLoad = true;
+    const unsub = onSnapshot(q, (snap) => {
+      if (firstLoad) {
+        firstLoad = false;
+        return;
+      }
+      const latest = snap.docChanges().filter(c => c.type === "added")[0];
+      if (latest) {
+        const newUser = latest.doc.data();
+        if (Notification.permission === "granted") {
+          new Notification("🎉 New User Joined!", {
+            body: `${newUser.username} just joined CUK Gossip.`,
+            icon: newUser.photoURL || "/avatars/male.png"
+          });
+        }
+      }
+    });
+
     return () => unsub();
   }, []);
 
@@ -206,11 +236,9 @@ export default function Dashboard() {
       </nav>
 
       <main style={{ maxWidth: 1000, margin: "20px auto", padding: "0 14px" }}>
-        {/* Discover */}
         {tab === "discover" && (
           <section>
             <h2 style={sectionTitle}>Discover</h2>
-            <p style={muted}>All users — tap Message to connect.</p>
             {loadingMatches ? <div style={muted}>Loading…</div> : (
               <div style={grid}>
                 {matches.length === 0 && <div style={empty}>No users found.</div>}
@@ -227,7 +255,6 @@ export default function Dashboard() {
           </section>
         )}
 
-        {/* Messages */}
         {tab === "messages" && (
           <section>
             <h2 style={sectionTitle}>Messages</h2>
@@ -256,7 +283,6 @@ export default function Dashboard() {
           </section>
         )}
 
-        {/* Community */}
         {tab === "community" && (
           <section>
             <h2 style={sectionTitle}>Community Feed</h2>
@@ -278,7 +304,6 @@ export default function Dashboard() {
           </section>
         )}
 
-        {/* Profile */}
         {tab === "profile" && (
           <section style={{ textAlign: "center" }}>
             <h2 style={sectionTitle}>Edit Profile</h2>
